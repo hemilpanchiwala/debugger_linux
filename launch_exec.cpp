@@ -31,9 +31,13 @@ void debugger::run() {
     // wait for process to change state
     waitpid(m_pid, &wait_status, 0);
 
-    string line = nullptr;
+    string line = "";
+    
+    while(true) {
+        auto quit = linenoise::Readline("hello> ", line);
 
-    while(linenoise::Readline("hello> ", line)) {
+        if(quit) break;
+
         runCommand(line);
         linenoise::AddHistory(line.c_str());
     }
@@ -56,10 +60,18 @@ void debugger::runCommand(const string& line) {
 void debugger::continue_execution() {
     ptrace(PTRACE_CONT, m_pid, nullptr, nullptr);
 
-    int wait_status = 0;
+    int wait_status;
     // wait for process to change state
     waitpid(m_pid, &wait_status, 0);
 
+}
+
+void execute_debugee (const string& prog_name) {
+    if (ptrace(PTRACE_TRACEME, 0, 0, 0) < 0) {
+        cerr << "Error in ptrace\n";
+        return;
+    }
+    execl(prog_name.c_str(), prog_name.c_str(), nullptr);
 }
 
 int main(int argc, char** argv) {
@@ -79,13 +91,7 @@ int main(int argc, char** argv) {
         // ptrace provides  a  means  by  which one process ("tracer")
         // may observe and control the execution  of  another  process ("tracee"), 
         // and examine and change the tracee's memory and registers.
-        if (ptrace(PTRACE_TRACEME, 0, 0, 0) < 0) {
-            cerr << "Error in ptrace\n";
-            return -1;
-        }
-
-        // Executing the program
-        execl(prog_name, prog_name, nullptr);
+        execute_debugee(prog_name);
         
     } else if (pid >= 1){
         // Parent process
@@ -93,9 +99,7 @@ int main(int argc, char** argv) {
         cout<<"Started debugging for process "<<pid<<" ...";
         debugger dbg{prog_name, pid};
 
-        cout<<"Hdkjejn"<<endl;
         dbg.run();
-        cout<<"Hdkcsdjejn"<<endl;
 
     }
     

@@ -5,7 +5,7 @@ using namespace std;
 
 vector<string> split(const string &s, char delimiter) {
 
-    vector<string> split_string;
+    vector<string> split_string{};
     stringstream ss {s};
     string item;
 
