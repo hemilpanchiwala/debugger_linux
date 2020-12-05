@@ -6,15 +6,16 @@
 class breakpoint {
 
     public:
-        breakpoint(pid_t pid, intptr_t addr) : m_pid{pid}, m_addr{addr}, m_enabled{false}, m_data{} {}
+        breakpoint() = default;
+        breakpoint(pid_t pid, intptr_t addr) : m_pid{pid}, m_addr{addr}, m_enabled{false}, m_data{NULL} {}
 
         void enable();
         void disable();
 
-        auto is_enabled() const->bool {
+        bool is_enabled() {
             return m_enabled;
         }
-        auto get_addr() const->intptr_t {
+        intptr_t get_addr() {
             return m_addr;
         }
 
@@ -31,15 +32,19 @@ void breakpoint::enable() {
 
     // Get data using ptrace using process ID and address
     auto data = ptrace(PTRACE_PEEKDATA, m_pid, m_addr, nullptr);
+    cout<<data<<endl;
 
     // Saving the bottom bytes of data
-    m_bottom_data = static_cast<uint8_t>(data & 0xff);
+    m_data = static_cast<uint8_t>(data & 0xff);
     
+    uint64_t int3 = 0xcc;
     // Set bottom bytes to 0xcc
-    uint64_t updated_data = ((data & ~0xff) | 0xcc);
+    uint64_t updated_data = ((data & ~0xff) | int3);
 
     // Updating data at the address
     ptrace(PTRACE_POKEDATA, m_pid, m_addr, updated_data);
+
+    cout<<updated_data<<endl;
     m_enabled = true;
 
 }
@@ -50,7 +55,7 @@ void breakpoint::disable() {
     auto data = ptrace(PTRACE_PEEKDATA, m_pid, m_addr, nullptr);
 
     // Restoring back the data by attaching the removed bottom bytes
-    restored_data = ((data & ~0xff) | m_bottom_data);
+    auto restored_data = ((data & ~0xff) | m_data);
 
     // Updating data at the address
     ptrace(PTRACE_POKEDATA, m_pid, m_addr, restored_data);

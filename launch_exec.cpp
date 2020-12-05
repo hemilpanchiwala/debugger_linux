@@ -1,6 +1,7 @@
 #include <iostream>
 #include <sys/wait.h>
 #include <sys/ptrace.h>
+#include <sys/personality.h>
 #include <unistd.h>
 #include <bits/stdc++.h>
 
@@ -80,7 +81,7 @@ void debugger::continue_execution() {
 
 void debugger::addBreakpoint(intptr_t addr) {
 
-    cout<<"Set breakpoint at address "<<hex<<addr<<endl;
+    cout<<"Set breakpoint at address 0x"<<hex<<addr<<endl;
     breakpoint bp{m_pid, addr};
     bp.enable();
     addr_to_bp[addr] = bp;
@@ -108,6 +109,7 @@ int main(int argc, char** argv) {
 
     if (pid == 0) {
         // Child process
+        personality(ADDR_NO_RANDOMIZE);        
 
         // ptrace provides  a  means  by  which one process ("tracer")
         // may observe and control the execution  of  another  process ("tracee"), 
