@@ -32,19 +32,16 @@ void breakpoint::enable() {
 
     // Get data using ptrace using process ID and address
     auto data = ptrace(PTRACE_PEEKDATA, m_pid, m_addr, nullptr);
-    cout<<data<<endl;
 
     // Saving the bottom bytes of data
     m_data = static_cast<uint8_t>(data & 0xff);
     
-    uint64_t int3 = 0xcc;
     // Set bottom bytes to 0xcc
-    uint64_t updated_data = ((data & ~0xff) | int3);
+    uint64_t updated_data = ((data & ~0xff) | 0xcc);
 
     // Updating data at the address
     ptrace(PTRACE_POKEDATA, m_pid, m_addr, updated_data);
 
-    cout<<updated_data<<endl;
     m_enabled = true;
 
 }
