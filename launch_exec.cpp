@@ -8,6 +8,7 @@
 #include "linenoise.hpp"
 #include "helper.h"
 #include "breakpoint.h"
+#include "registers.h"
 
 using namespace std;
 
@@ -20,6 +21,7 @@ class debugger {
         void runCommand(const string& line);
         void continue_execution();
         void addBreakpoint(intptr_t addr);
+        void dump_registers();
 
     private:
         string m_prog_name;
@@ -63,6 +65,25 @@ void debugger::runCommand(const string& line) {
         // Taking first 16 bytes from the address
         auto m_addr = stol(addr, 0, 16);
         addBreakpoint(m_addr);
+    } else if (is_prefix(input_command, "register")) {
+        if (is_prefix(args[1], "dump")) {
+            dump_registers();
+        } else if (is_prefix(args[1], "read")) {
+            cout<<get_register_value_from_type(m_pid, get_register_type_from_name(args[2]))<<endl;
+        } else if (is_prefix(args[1], "write")) {
+            string val {args[3], 2};
+            set_register_value(m_pid, get_register_type_from_name(args[2]), stol(val, 0, 16));
+        }
+    } else if (is_prefix(input_command, "memory")) {
+        string addr {args[2], 2};
+
+        if(is_prefix(args[1], "read")) {
+            cout<<"READ: "<<ptrace(PTRACE_PEEKDATA, m_pid, stol(addr, 0, 16), nullptr)<<endl;
+        } else if(is_prefix(args[1], "write")) {
+            string value {args[3], 2};
+            ptrace(PTRACE_POKEDATA, m_pid, stol(addr, 0, 16), stol(value, 0, 16));
+        }
+
     } else {
         cerr<<"No command found!! \n";
     }
@@ -85,6 +106,14 @@ void debugger::addBreakpoint(intptr_t addr) {
     breakpoint bp{m_pid, addr};
     bp.enable();
     addr_to_bp[addr] = bp;
+
+}
+
+void debugger::dump_registers() {
+
+    for (const auto& rg: registers) {
+        cout<<"Register "<<rg.name<<" "<<get_register_value_from_type(m_pid, rg.r_type)<<endl;
+    }
 
 }
 
