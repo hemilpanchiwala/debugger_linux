@@ -6,6 +6,7 @@
 
 #include "linenoise.hpp"
 #include "helper.h"
+#include "breakpoint.h"
 
 using namespace std;
 
@@ -17,15 +18,18 @@ class debugger {
         void run();
         void runCommand(const string& line);
         void continue_execution();
+        void addBreakpoint(intptr_t addr);
 
     private:
         string m_prog_name;
         pid_t m_pid;
+        unordered_map<intptr_t, breakpoint> addr_to_bp;
 
 };
 
 
 void debugger::run() {
+
     int wait_status;
 
     // wait for process to change state
@@ -51,6 +55,13 @@ void debugger::runCommand(const string& line) {
 
     if (is_prefix(input_command, "continue")) {
         continue_execution();
+    } else if (is_prefix(input_command, "break")) {
+        // Removing first 2 char from address as it contains 0x
+        string addr {args[1], 2};
+
+        // Taking first 16 bytes from the address
+        auto m_addr = stol(addr, 0, 16);
+        addBreakpoint(m_addr);
     } else {
         cerr<<"No command found!! \n";
     }
@@ -58,11 +69,21 @@ void debugger::runCommand(const string& line) {
 }
 
 void debugger::continue_execution() {
+
     ptrace(PTRACE_CONT, m_pid, nullptr, nullptr);
 
     int wait_status;
     // wait for process to change state
     waitpid(m_pid, &wait_status, 0);
+
+}
+
+void debugger::addBreakpoint(intptr_t addr) {
+
+    cout<<"Set breakpoint at address "<<hex<<addr<<endl;
+    breakpoint bp{m_pid, addr};
+    bp.enable();
+    addr_to_bp[addr] = bp;
 
 }
 
@@ -104,5 +125,3 @@ int main(int argc, char** argv) {
     }
     
 }
-
-
