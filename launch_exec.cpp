@@ -22,6 +22,9 @@ class debugger {
         void continue_execution();
         void addBreakpoint(intptr_t addr);
         void dump_registers();
+        uint64_t get_program_counter();
+        void set_program_counter(uint64_t pc);
+        void step_over_breakpoint();
 
     private:
         string m_prog_name;
@@ -92,6 +95,7 @@ void debugger::runCommand(const string& line) {
 
 void debugger::continue_execution() {
 
+    step_over_breakpoint();
     ptrace(PTRACE_CONT, m_pid, nullptr, nullptr);
 
     int wait_status;
@@ -115,6 +119,33 @@ void debugger::dump_registers() {
         cout<<"Register "<<rg.name<<" "<<get_register_value_from_type(m_pid, rg.r_type)<<endl;
     }
 
+}
+
+uint64_t debugger::get_program_counter() {
+    return get_register_value_from_type(m_pid, register_type::rip);
+}
+
+void debugger::set_program_counter(uint64_t pc) {
+    set_register_value(m_pid, register_type::rip, pc);
+}
+
+void debugger::step_over_breakpoint() {
+    auto loc = get_program_counter() - 1;
+
+    if(addr_to_bp.count(loc)) {
+        auto& breakpoint = addr_to_bp[loc];
+
+        if (breakpoint.is_enabled()) {
+            auto prev_loc = loc;
+            set_program_counter(prev_loc);
+
+            breakpoint.disable();
+            ptrace(PTRACE_SINGLESTEP, m_pid, 0, nullptr);
+            int wait_status;
+            waitpid(m_pid, &wait_status, 0);
+            breakpoint.enable();
+        }
+    }
 }
 
 void execute_debugee (const string& prog_name) {
