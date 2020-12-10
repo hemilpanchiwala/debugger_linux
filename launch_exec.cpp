@@ -2,6 +2,7 @@
 #include <sys/wait.h>
 #include <sys/ptrace.h>
 #include <sys/personality.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <bits/stdc++.h>
 
@@ -9,13 +10,27 @@
 #include "helper.h"
 #include "breakpoint.h"
 #include "registers.h"
+#include "dwarf/dwarf++.hh"
+#include "elf/elf++.hh"
 
 using namespace std;
 
 class debugger {
 
     public:
-        debugger(string prog_name, pid_t pid) : m_prog_name{move(prog_name)}, m_pid{pid} {}
+        debugger(string prog_name, pid_t pid) : m_prog_name{move(prog_name)}, m_pid{pid} {
+
+            auto file = open(m_prog_name.c_str(), O_RDONLY);
+
+            m_elf = elf::elf{
+                elf::create_mmap_loader(file)
+            };
+
+            m_dwarf = dwarf::dwarf{
+                dwarf::elf::create_loader(m_elf)
+            };
+
+        }
 
         void run();
         void runCommand(const string& line);
@@ -25,11 +40,18 @@ class debugger {
         uint64_t get_program_counter();
         void set_program_counter(uint64_t pc);
         void step_over_breakpoint();
+        dwarf::die get_func_using_pc(uint64_t pc);
+        dwarf::line_table::iterator get_line_entry_using_pc(uint64_t pc);
+        void initialize_load_address();
+        uint64_t get_offset_load_address(uint64_t addr);
 
     private:
         string m_prog_name;
         pid_t m_pid;
         unordered_map<intptr_t, breakpoint> addr_to_bp;
+        dwarf::dwarf m_dwarf;
+        elf::elf m_elf;
+        uint64_t m_load_address;
 
 };
 
@@ -146,6 +168,65 @@ void debugger::step_over_breakpoint() {
             breakpoint.enable();
         }
     }
+}
+
+void debugger::initialize_load_address() {
+
+    // This checks whether the file is dynamic library
+    if(m_elf.get_hdr().type == elf::et::dyn) {   
+        // Load address is present at /proc/process_pid/maps file
+        ifstream map("/proc/" + to_string(m_pid) + "/maps");
+
+        // The first in the file is the load address
+        string address;
+        getline(map, address, '-');
+
+        m_load_address = stoi(address, 0, 16);
+    }
+}
+
+uint64_t debugger::get_offset_load_address(uint64_t addr) {
+    return addr - m_load_address;
+}
+
+dwarf::die debugger::get_func_using_pc(uint64_t pc) {
+
+    // Iterating through all the compile units
+    for(auto &compile_units: m_dwarf.compilation_units()) {
+        // Checking if program counter is between DW_AT_low_pc and DW_AT_high_pc
+        if(dwarf::die_pc_range(compile_units.root()).contains(pc)) {
+            // Iterating through all DWARF information entries (die) in compile unit
+            for(auto &die: compile_units.root()) {
+                // Checking if the die is a function (as it can be variable or any other type)
+                if(die.tag == dwarf::DW_TAG::subprogram) {
+                    // Checking if program counter is between DW_AT_low_pc and DW_AT_high_pc
+                    if(dwarf::die_pc_range(die).contains(pc)) {
+                        return die;
+                    }
+                }
+            }
+        }
+    }
+
+    throw out_of_range{"Function not found!!!"};
+}
+
+dwarf::line_table::iterator debugger::get_line_entry_using_pc(uint64_t pc) {
+
+    for(auto &compile_units: m_dwarf.compilation_units()) {
+        if(dwarf::die_pc_range(compile_units.root()).contains(pc)) {
+            auto& line_table = compile_units.get_line_table();
+            auto iterator = line_table.find_address(pc);
+
+            if(iterator != line_table.end()) {
+                return iterator;
+            } else {
+                throw out_of_range{"Line Table not found!!!"};
+            }
+        }
+    }
+
+    throw out_of_range{"Line Table not found!!!"};
 }
 
 void execute_debugee (const string& prog_name) {
