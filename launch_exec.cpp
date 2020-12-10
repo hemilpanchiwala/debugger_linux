@@ -44,6 +44,10 @@ class debugger {
         dwarf::line_table::iterator get_line_entry_using_pc(uint64_t pc);
         void initialize_load_address();
         uint64_t get_offset_load_address(uint64_t addr);
+        void print_source(string file_name, unsigned line, unsigned context_size);
+        siginfo_t get_signal_info();
+        void wait_for_signal();
+        void handle_bptrap(siginfo_t);
 
     private:
         string m_prog_name;
@@ -58,10 +62,8 @@ class debugger {
 
 void debugger::run() {
 
-    int wait_status;
-
-    // wait for process to change state
-    waitpid(m_pid, &wait_status, 0);
+    wait_for_signal();
+    initialize_load_address();
 
     string line = "";
     
@@ -120,9 +122,7 @@ void debugger::continue_execution() {
     step_over_breakpoint();
     ptrace(PTRACE_CONT, m_pid, nullptr, nullptr);
 
-    int wait_status;
-    // wait for process to change state
-    waitpid(m_pid, &wait_status, 0);
+    wait_for_signal();
 
 }
 
@@ -151,20 +151,57 @@ void debugger::set_program_counter(uint64_t pc) {
     set_register_value(m_pid, register_type::rip, pc);
 }
 
+void debugger::wait_for_signal() {
+    int wait_status;
+
+    // wait for process to change state
+    waitpid(m_pid, &wait_status, 0);
+
+    auto signal = get_signal_info();
+
+    switch(signal.si_signo) {
+        case SIGTRAP:
+            handle_bptrap(signal);
+            break;
+        case SIGSEGV:
+            cout<<"Segmentation Fault caused because of "<<signal.si_code<<endl;
+            break;
+        default:
+            cout<<"Signal: "<<signal.si_code<<endl;
+    }
+
+}
+
+void debugger::handle_bptrap(siginfo_t sig_info) {
+
+    switch(sig_info.si_code){
+        case SI_KERNEL:
+        case TRAP_BRKPT:
+        {
+            set_program_counter(get_program_counter() - 1);
+            cout<<"Breakpoint at address 0x"<<hex<<get_program_counter()<<endl;
+            auto offset = get_offset_load_address(get_program_counter());
+            auto line_entry = get_line_entry_using_pc(offset);
+            print_source(line_entry->file->path, line_entry->line, 2);
+            break;
+        }
+        case TRAP_TRACE:
+            break;
+        default:
+            cout<<"Unknown trap!!"<<endl;
+    }
+    return;
+
+}
+
 void debugger::step_over_breakpoint() {
-    auto loc = get_program_counter() - 1;
 
-    if(addr_to_bp.count(loc)) {
-        auto& breakpoint = addr_to_bp[loc];
+    if(addr_to_bp.count(get_program_counter())) {
+        auto& breakpoint = addr_to_bp[get_program_counter()];
 
-        if (breakpoint.is_enabled()) {
-            auto prev_loc = loc;
-            set_program_counter(prev_loc);
-
-            breakpoint.disable();
+        if (breakpoint.is_enabled()) {breakpoint.disable();
             ptrace(PTRACE_SINGLESTEP, m_pid, 0, nullptr);
-            int wait_status;
-            waitpid(m_pid, &wait_status, 0);
+            wait_for_signal();
             breakpoint.enable();
         }
     }
@@ -181,7 +218,7 @@ void debugger::initialize_load_address() {
         string address;
         getline(map, address, '-');
 
-        m_load_address = stoi(address, 0, 16);
+        m_load_address = stol(address, 0, 16);
     }
 }
 
@@ -218,15 +255,54 @@ dwarf::line_table::iterator debugger::get_line_entry_using_pc(uint64_t pc) {
             auto& line_table = compile_units.get_line_table();
             auto iterator = line_table.find_address(pc);
 
-            if(iterator != line_table.end()) {
-                return iterator;
+            if(iterator == line_table.end()) {
+                throw out_of_range{"11Line Table not found!!!"};
             } else {
-                throw out_of_range{"Line Table not found!!!"};
+                return iterator;
             }
         }
     }
 
     throw out_of_range{"Line Table not found!!!"};
+}
+
+void debugger::print_source(string file_name, unsigned line, unsigned context_size) {
+
+    ifstream file {file_name};
+
+    // Defining the start and end of window around line to print
+    auto start_line = (line > context_size) ? (line - context_size) : 1;
+    auto end_line = line + context_size + ((context_size > line) ? (context_size - line) : 0) + 1;
+
+    char c{};
+    auto current = 1u;
+    while(current != start_line && file.get(c)) {
+        if(c == '\n') {
+            current++;
+        }
+    }
+
+    if(current == line) {
+        cout<<"> ";
+    }else{
+        cout<<" ";
+    }
+
+    while(current <= end_line && file.get(c)) {
+        cout<<c;
+        if(c == '\n'){
+            current++;
+            cout<<(current == line) ? "> " : " ";
+        }
+    }
+
+    cout<<endl;
+}
+
+siginfo_t debugger::get_signal_info() {
+    siginfo_t s_info;
+    ptrace(PTRACE_GETSIGINFO, m_pid, nullptr, &s_info);
+    return s_info;
 }
 
 void execute_debugee (const string& prog_name) {
