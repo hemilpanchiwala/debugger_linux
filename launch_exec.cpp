@@ -10,6 +10,7 @@
 #include "helper.h"
 #include "breakpoint.h"
 #include "registers.h"
+#include "symbol.h"
 #include "dwarf/dwarf++.hh"
 #include "elf/elf++.hh"
 
@@ -58,6 +59,9 @@ class debugger {
         void step_out();
         void step_in();
         void step_over();
+        void set_bp_at_func(string name);
+        void set_bp_at_source_line(string file_name, unsigned line);
+        vector<symbol> lookup_symbol(string name);
 
     private:
         string m_prog_name;
@@ -96,12 +100,21 @@ void debugger::runCommand(const string& line) {
     if (is_prefix(input_command, "continue")) {
         continue_execution();
     } else if (is_prefix(input_command, "break")) {
-        // Removing first 2 char from address as it contains 0x
-        string addr {args[1], 2};
+        if (args[1][0] == '0' && args[1][1] == 'x') {
+            // Removing first 2 char from address as it contains 0x
+            string addr {args[1], 2};
 
-        // Taking first 16 bytes from the address
-        auto m_addr = stol(addr, 0, 16);
-        addBreakpoint(m_addr);
+            // Taking first 16 bytes from the address
+            auto m_addr = stol(addr, 0, 16);
+            addBreakpoint(m_addr);
+        } else if (args[1].find(':') != string::npos) {
+            // This is for line number breakpoint: <filename>:<line>
+            auto file_and_line = split(args[1], ':');
+            set_bp_at_source_line(file_and_line[0], stoi(file_and_line[1]));
+        } else {
+            // This is for setting breakpoint on function
+            set_bp_at_func(args[1]);
+        }
     } else if (is_prefix(input_command, "register")) {
         if (is_prefix(args[1], "dump")) {
             dump_registers();
@@ -133,7 +146,13 @@ void debugger::runCommand(const string& line) {
         step_over();
     } else if (is_prefix(input_command, "finish")) {
         step_out();
-    } else {
+    } else if (is_prefix(input_command, "symbol")) {
+        auto symbols = lookup_symbol(args[1]);
+        for(auto& symbol: symbols) {
+            cout<<symbol.name<<" "<<to_string(symbol.type)<<" address 0x"<<hex<<symbol.address<<endl;
+        }
+    } 
+    else {
         cerr<<"No command found!! \n";
     }
 
@@ -439,7 +458,62 @@ void debugger::step_over() {
 
 }
 
-void execute_debugee (const string& prog_name) {
+void debugger::set_bp_at_func(string name) {
+
+    for(auto& compile_unit: m_dwarf.compilation_units()) {
+        for(auto& die: compile_unit.root()) {
+            if(die.has(dwarf::DW_AT::name) && (dwarf::at_name(die) == name)) {
+                auto low_pc = dwarf::at_low_pc(die);
+                auto line_entry = get_line_entry_using_pc(low_pc);
+                // Here, before starting function there is a prologue which needs to be skipped
+                line_entry++;
+                addBreakpoint(get_offset_dwarf_address(line_entry->address));
+            }
+        }
+    }
+
+}
+
+void debugger::set_bp_at_source_line(string file_name, unsigned line) {
+
+    for(auto& compile_unit: m_dwarf.compilation_units()) {
+        if(is_suffix(file_name, dwarf::at_name(compile_unit.root()))) {
+            auto line_table = compile_unit.get_line_table();
+            for(auto& line_entry: line_table) {
+                // is_stmt -> check that line table entry is marked as the beginning of a statement
+                if(line_entry.is_stmt && (line_entry.address == line)) {
+                    addBreakpoint(get_offset_dwarf_address(line_entry.address));
+                    return;
+                }
+            }
+        }
+    }
+
+}
+
+vector<symbol> debugger::lookup_symbol(string name) {
+
+    vector<symbol> symbols;
+
+    for(auto& section: m_elf.sections()) {
+        // Symbol tables can only be present in sections of type DYNSYM or SYMTAB
+        if ((section.get_hdr().type == elf::sht::dynsym) || section.get_hdr().type == elf::sht::symtab) {
+
+            for(auto sym: section.as_symtab()) {
+                if (sym.get_name() == name) {
+                    auto& data = sym.get_data();
+                    symbols.push_back(symbol{map_elf_symbol_to_struct_symbol_type(data.type()), sym.get_name(), data.value});
+                }
+            }
+
+        }
+    }
+
+    return symbols;
+
+}
+
+void execute_debugee(const string& prog_name) {
     if (ptrace(PTRACE_TRACEME, 0, 0, 0) < 0) {
         cerr << "Error in ptrace\n";
         return;

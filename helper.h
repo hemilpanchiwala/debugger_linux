@@ -26,3 +26,13 @@ bool is_prefix(const string& a, const string& b){
     return equal(a.begin(), a.end(), b.begin());
 
 }
+
+bool is_suffix(const string& a, const string& b) {
+    
+    if(a.size() > b.size()) {
+        return false;
+    }
+
+    return equal(a.begin(), a.end(), b.begin() + (b.size() - a.size()));
+
+}
