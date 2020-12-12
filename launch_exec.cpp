@@ -62,6 +62,7 @@ class debugger {
         void set_bp_at_func(string name);
         void set_bp_at_source_line(string file_name, unsigned line);
         vector<symbol> lookup_symbol(string name);
+        void print_backtrace();
 
     private:
         string m_prog_name;
@@ -151,8 +152,9 @@ void debugger::runCommand(const string& line) {
         for(auto& symbol: symbols) {
             cout<<symbol.name<<" "<<to_string(symbol.type)<<" address 0x"<<hex<<symbol.address<<endl;
         }
-    } 
-    else {
+    } else if (is_prefix(input_command, "backtrace")) {
+        print_backtrace();
+    } else {
         cerr<<"No command found!! \n";
     }
 
@@ -510,6 +512,28 @@ vector<symbol> debugger::lookup_symbol(string name) {
     }
 
     return symbols;
+
+}
+
+void debugger::print_backtrace() {
+
+    // Lambda expression for printing frame
+    auto output_frame = [frame_np = 0] (auto&& func) mutable {
+        cout<<"Frame number: #"<<(frame_np++)<<" 0x"<<dwarf::at_low_pc(func)<<" "<<dwarf::at_name(func)<<endl;
+    };
+
+    auto current_func = get_func_using_pc(get_offset_load_address(get_program_counter()));
+    output_frame(current_func);
+
+    auto frame_pointer = get_register_value_from_type(m_pid, register_type::rbp);
+    auto return_address = read_memory(frame_pointer + 8);
+
+    while(dwarf::at_name(current_func) != "main") {
+        current_func = get_func_using_pc(get_offset_load_address(return_address));
+        output_frame(current_func);
+        frame_pointer = read_memory(frame_pointer);
+        return_address = read_memory(frame_pointer + 8);
+    }
 
 }
 
