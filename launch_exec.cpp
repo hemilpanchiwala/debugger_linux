@@ -7,11 +7,11 @@
 #include <unistd.h>
 #include <bits/stdc++.h>
 
-#include "linenoise.hpp"
-#include "helper.h"
-#include "breakpoint.h"
-#include "registers.h"
-#include "symbol.h"
+#include "linenoise/linenoise.hpp"
+#include "include/helper.h"
+#include "include/breakpoint.h"
+#include "include/registers.h"
+#include "include/symbol.h"
 #include "dwarf/dwarf++.hh"
 #include "elf/elf++.hh"
 
